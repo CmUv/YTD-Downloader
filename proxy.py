@@ -1,7 +1,6 @@
 import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox
-import re
 
 # Configuración de Proxy (Reemplaza con tu proxy si es necesario)
 DEFAULT_PROXY = "http://192.168.49.1:8000"
@@ -10,7 +9,7 @@ class YTDownloaderApp:
     def __init__(self, root):
         self.root = root
         self.root.title("YouTube Downloader con Proxy")
-        self.root.geometry("550x350")
+        self.root.geometry("800x500")
 
         # URL del video
         ttk.Label(root, text="URL del video:").pack(pady=5)
@@ -22,7 +21,7 @@ class YTDownloaderApp:
         self.get_quality_btn.pack(pady=5)
 
         # Lista de calidades
-        self.quality_combobox = ttk.Combobox(root, state="readonly", width=60)
+        self.quality_combobox = ttk.Combobox(root, state="readonly", width=80)
         self.quality_combobox.pack(pady=5)
 
         # Botón para descargar
@@ -57,9 +56,13 @@ class YTDownloaderApp:
                 parts = line.split()
                 if len(parts) > 4 and parts[0].isdigit():
                     format_id = parts[0]
-                    resolution = parts[1] if "x" in parts[1] else "Desconocido"
-                    codec = parts[2] if len(parts) > 2 else "N/A"
-                    description = f"{format_id} - {resolution} - {codec}"
+                    extension = parts[1]
+                    resolution = parts[2] if "x" in parts[2] else "Desconocido"
+                    fps = parts[3] if parts[3].isdigit() else "0"
+                    codec = parts[4] if len(parts) > 4 else "N/A"
+                    filesize = parts[5] if len(parts) > 5 else "N/A"
+                    tbr = parts[6] if len(parts) > 6 else "N/A"
+                    description = f"{format_id:<6} {extension:<6} {resolution:<10} {fps:<3} │ {filesize:<12} {tbr:<5} │ {codec:<15}"
                     formats.append(description)
                     self.format_dict[description] = format_id  # Guardamos el ID real
 
@@ -92,26 +95,13 @@ class YTDownloaderApp:
         self.root.update_idletasks()
 
         try:
-            # Ejecutar el proceso yt-dlp y obtener las actualizaciones de progreso
-            process = subprocess.Popen(
+            subprocess.run(
                 ["yt-dlp", "--proxy", DEFAULT_PROXY, "-f", format_id, url, "-o", "%(title)s.%(ext)s"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
                 text=True
             )
-
-            # Leer la salida del proceso para actualizar la barra de progreso
-            for line in process.stdout:
-                if "ETA" in line:  # Busca la línea de progreso
-                    match = re.search(r'(\d+)%', line)
-                    if match:
-                        progress = int(match.group(1))
-                        self.progress["value"] = progress
-                        self.root.update_idletasks()
-
-            process.communicate()  # Espera a que termine el proceso
             self.progress["value"] = 100
             messagebox.showinfo("Éxito", "Descarga completada correctamente.")
+
         except Exception as e:
             messagebox.showerror("Error", f"Error al descargar: {str(e)}")
             self.progress["value"] = 0
