@@ -1,9 +1,10 @@
 import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox
+import re
 
 # Configuración de Proxy (Reemplaza con tu proxy si es necesario)
-DEFAULT_PROXY = "http://tu-proxy-aqui:puerto"
+DEFAULT_PROXY = "http://192.168.49.1:8000"
 
 class YTDownloaderApp:
     def __init__(self, root):
@@ -91,13 +92,26 @@ class YTDownloaderApp:
         self.root.update_idletasks()
 
         try:
-            subprocess.run(
+            # Ejecutar el proceso yt-dlp y obtener las actualizaciones de progreso
+            process = subprocess.Popen(
                 ["yt-dlp", "--proxy", DEFAULT_PROXY, "-f", format_id, url, "-o", "%(title)s.%(ext)s"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True
             )
+
+            # Leer la salida del proceso para actualizar la barra de progreso
+            for line in process.stdout:
+                if "ETA" in line:  # Busca la línea de progreso
+                    match = re.search(r'(\d+)%', line)
+                    if match:
+                        progress = int(match.group(1))
+                        self.progress["value"] = progress
+                        self.root.update_idletasks()
+
+            process.communicate()  # Espera a que termine el proceso
             self.progress["value"] = 100
             messagebox.showinfo("Éxito", "Descarga completada correctamente.")
-
         except Exception as e:
             messagebox.showerror("Error", f"Error al descargar: {str(e)}")
             self.progress["value"] = 0
