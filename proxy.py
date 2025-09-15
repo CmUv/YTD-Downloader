@@ -1,50 +1,73 @@
 import subprocess
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, filedialog, messagebox
+import threading
 
-# Configuración de Proxy (Reemplaza con tu proxy si es necesario)
-DEFAULT_PROXY = "http://192.168.49.1:8000"
-
+# Clase para la interfaz de usuario
 class YTDownloaderApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("YouTube Downloader con Proxy")
-        self.root.geometry("800x500")
+        self.root.title("YouTube Downloader")
+        self.root.geometry("900x600")
 
-        # URL del video
+        self.download_path = None
+        self.process = None
+        self.cancel_download_flag = False
+        self.format_dict = {}
+
+        # Etiqueta para la URL
         ttk.Label(root, text="URL del video:").pack(pady=5)
         self.url_entry = ttk.Entry(root, width=50)
         self.url_entry.pack(pady=5)
 
         # Botón para obtener calidades
-        self.get_quality_btn = ttk.Button(root, text="Obtener calidades", command=self.get_qualities)
+        self.get_quality_btn = ttk.Button(root, text="Obtener calidades", command=self.start_get_qualities_thread)
         self.get_quality_btn.pack(pady=5)
 
-        # Lista de calidades
+        # Indicador de carga
+        self.loading_label = ttk.Label(root, text="Obteniendo calidades...", state="disabled")
+        self.loading_label.pack(pady=5)
+
+        # Combobox para elegir calidades
         self.quality_combobox = ttk.Combobox(root, state="readonly", width=80)
         self.quality_combobox.pack(pady=5)
 
         # Botón para descargar
-        self.download_btn = ttk.Button(root, text="Descargar", command=self.download_video)
+        self.download_btn = ttk.Button(root, text="Descargar", command=self.start_download_thread, state="disabled")
         self.download_btn.pack(pady=10)
+
+        # Botón de cancelar
+        self.cancel_btn = ttk.Button(root, text="Cancelar", command=self.cancel_download, state="disabled")
+        self.cancel_btn.pack(pady=5)
 
         # Barra de progreso
         self.progress = ttk.Progressbar(root, length=300, mode="determinate")
         self.progress.pack(pady=10)
 
-        # Diccionario para almacenar los formatos
-        self.format_dict = {}
+        # Etiqueta de progreso
+        self.progress_label = ttk.Label(root, text="Progreso: 0%")
+        self.progress_label.pack(pady=5)
+
+    def start_get_qualities_thread(self):
+        """ Inicia el hilo para obtener las calidades sin bloquear la interfaz """
+        threading.Thread(target=self.get_qualities).start()
 
     def get_qualities(self):
-        """ Obtiene las calidades disponibles del video """
+        """ Obtiene las calidades del video y las muestra en un formato amigable """
         url = self.url_entry.get().strip()
+
         if not url:
-            messagebox.showwarning("Advertencia", "Ingrese una URL válida")
+            messagebox.showwarning("Advertencia", "Por favor ingrese una URL válida")
             return
+
+        # Mostrar el indicador de carga
+        self.loading_label.config(state="normal")
+        self.get_quality_btn.config(state="disabled")
+        self.root.update_idletasks()
 
         try:
             result = subprocess.run(
-                ["yt-dlp", "--proxy", DEFAULT_PROXY, "-F", url],
+                ["yt-dlp", "-F", url],
                 capture_output=True,
                 text=True
             )
@@ -52,59 +75,111 @@ class YTDownloaderApp:
             formats = []
             self.format_dict.clear()
 
+            # Buscar los formatos disponibles en la salida de yt-dlp
             for line in output.split("\n"):
-                parts = line.split()
-                if len(parts) > 4 and parts[0].isdigit():
+                if line.startswith("format code"):
+                    continue  # Saltamos la línea de encabezado
+                if len(line.split()) > 0 and line.split()[0].isdigit():
+                    parts = line.split()
                     format_id = parts[0]
-                    extension = parts[1]
                     resolution = parts[2] if "x" in parts[2] else "Desconocido"
-                    fps = parts[3] if parts[3].isdigit() else "0"
-                    codec = parts[4] if len(parts) > 4 else "N/A"
-                    filesize = parts[5] if len(parts) > 5 else "N/A"
-                    tbr = parts[6] if len(parts) > 6 else "N/A"
-                    description = f"{format_id:<6} {extension:<6} {resolution:<10} {fps:<3} │ {filesize:<12} {tbr:<5} │ {codec:<15}"
+                    ext = parts[1]
+                    filesize = parts[4] if len(parts) > 4 else "N/A"
+                    codec = parts[7] if len(parts) > 7 else "N/A"
+                    description = f"{format_id:<6} {resolution:<12} {ext:<6} {filesize:<12} {codec:<15}"
                     formats.append(description)
-                    self.format_dict[description] = format_id  # Guardamos el ID real
+                    self.format_dict[description] = format_id
 
             if formats:
                 self.quality_combobox["values"] = formats
                 self.quality_combobox.current(0)
+                self.download_btn.config(state="normal")
                 messagebox.showinfo("Éxito", "Calidades obtenidas correctamente.")
             else:
-                messagebox.showwarning("Error", "No se encontraron formatos disponibles.")
-
+                messagebox.showwarning("Error", "No se encontraron formatos para este video.")
+        
         except Exception as e:
-            messagebox.showerror("Error", f"Ocurrió un problema: {str(e)}")
+            messagebox.showerror("Error", f"Ocurrió un error: {str(e)}")
 
-    def download_video(self):
-        """ Descarga el video con la calidad seleccionada """
-        url = self.url_entry.get().strip()
-        selected_format = self.quality_combobox.get()
-
-        if not url or not selected_format:
-            messagebox.showwarning("Advertencia", "Seleccione una calidad de descarga")
-            return
-
-        format_id = self.format_dict.get(selected_format, "")
-
-        if not format_id:
-            messagebox.showerror("Error", "Formato seleccionado inválido")
-            return
-
-        self.progress["value"] = 10
+        # Ocultar el indicador de carga
+        self.loading_label.config(state="disabled")
+        self.get_quality_btn.config(state="normal")
         self.root.update_idletasks()
 
+    def start_download_thread(self):
+        """ Inicia el hilo para la descarga sin bloquear la interfaz """
+        self.download_path = filedialog.askdirectory(title="Seleccionar carpeta de descarga")
+        if not self.download_path:
+            messagebox.showwarning("Advertencia", "Debe seleccionar una carpeta para la descarga.")
+            return
+
+        self.cancel_download_flag = False
+        self.cancel_btn.config(state="normal")
+        threading.Thread(target=self.download_video).start()
+
+    def download_video(self):
+        """ Realiza la descarga del video con la calidad seleccionada """
+        url = self.url_entry.get().strip()
+        selected_quality = self.quality_combobox.get()
+        format_id = self.format_dict.get(selected_quality, "")
+
+        if not url or not format_id:
+            messagebox.showwarning("Advertencia", "Seleccione un formato de descarga válido.")
+            return
+
         try:
-            subprocess.run(
-                ["yt-dlp", "--proxy", DEFAULT_PROXY, "-f", format_id, url, "-o", "%(title)s.%(ext)s"],
+            self.process = subprocess.Popen(
+                ["yt-dlp", "-f", format_id, url, "-o", f"{self.download_path}/%(title)s.%(ext)s"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True
             )
-            self.progress["value"] = 100
-            messagebox.showinfo("Éxito", "Descarga completada correctamente.")
+
+            # Leer la salida del proceso y actualizar la barra de progreso
+            for line in self.process.stdout:
+                if self.cancel_download_flag:
+                    self.process.kill()
+                    messagebox.showinfo("Cancelado", "La descarga ha sido cancelada.")
+                    break
+                if "%" in line:
+                    self.update_progress(line)
+
+            self.process.wait()
+            if not self.cancel_download_flag:
+                messagebox.showinfo("Completado", "Descarga finalizada correctamente.")
+            else:
+                self.progress["value"] = 0
+                self.progress_label.config(text="Progreso: 0%")
 
         except Exception as e:
-            messagebox.showerror("Error", f"Error al descargar: {str(e)}")
-            self.progress["value"] = 0
+            messagebox.showerror("Error", f"Hubo un error al intentar descargar el video: {str(e)}")
+
+        self.cancel_btn.config(state="disabled")
+
+    def update_progress(self, line):
+        """ Actualiza la barra de progreso y el texto del progreso """
+        try:
+            # Extraemos el porcentaje de progreso
+            if "%" in line:
+                progress = int(re.search(r'(\d+)%', line).group(1))
+                self.progress["value"] = progress
+                self.progress_label.config(text=f"Progreso: {progress}%")
+
+            # Extraemos el ETA
+            if "ETA" in line:
+                eta = line.split("ETA")[-1].strip()
+                self.progress_label.config(text=f"Progreso: {self.progress['value']}% | ETA: {eta}")
+
+            self.root.update_idletasks()
+
+        except Exception as e:
+            print(f"Error al actualizar progreso: {e}")
+
+    def cancel_download(self):
+        """ Cancela la descarga """
+        self.cancel_download_flag = True
+        if self.process:
+            self.process.kill()
 
 if __name__ == "__main__":
     root = tk.Tk()
